@@ -3,24 +3,19 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
 
-// Ensure the root element exists
-const rootEl = document.getElementById('root');
-if (rootEl) {
-  const root = ReactDOM.createRoot(rootEl);
-  root.render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
-} else {
-  // If #root is missing, create it dynamically and append to body
-  const createdRoot = document.createElement('div');
-  createdRoot.id = 'root';
-  document.body.appendChild(createdRoot);
-  const root = ReactDOM.createRoot(createdRoot);
-  root.render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
+// Mount the React app in the #root element.
+// If #root div not present, create and append it to body.
+let rootEl = document.getElementById('root');
+if (!rootEl) {
+  rootEl = document.createElement('div');
+  rootEl.id = 'root';
+  document.body.appendChild(rootEl);
 }
+
+// React 18+ correct mounting
+const root = ReactDOM.createRoot(rootEl);
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
