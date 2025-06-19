@@ -231,7 +231,13 @@ function App() {
     }
   }
 
-  // Layout: dashboard with sidebar, main area, right info
+  /*
+ * Check for all referenced subcomponents and define them as stubs if missing, to avoid blank screen:
+ * SidebarNav, AlertList, MiniAlertList, PortfolioTable, ProfitLossTable, MarketOverview, MarketAnalytics, VolatilityMonitor, OrderTable, PlaceOrderForm, BulkOrderForm, OptionTradingInsights, RecommendationsEngine, MarketMonitor
+ * If any are undefined, declare a simple stub at minimum, so the app renders.
+ */
+ 
+// Layout: dashboard with sidebar, main area, right info
   return (
     <div className="app-container dashboard-light" style={{ background: "#f8fafc", minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Navbar */}
@@ -353,6 +359,8 @@ function App() {
     </div>
   );
 }
+
+/* Ensure all subcomponents are at minimum stubbed out if missing (avoiding blank screen): */
 
 //------------------ COMPONENTS ---------------------
 
