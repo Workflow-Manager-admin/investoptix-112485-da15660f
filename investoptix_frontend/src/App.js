@@ -1,75 +1,113 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 
-/**
- * Color theme config for InvestOptix (light theme)
- * Primary: #0d6efd, Secondary: #6c757d, Accent: #6610f2
- */
+// Base URL for the backend, from environment
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || process.env.BASE_URL || 'http://localhost:5000/api';
+
+// PUBLIC_INTERFACE
+async function apiFetch(endpoint, opts = {}) {
+  // Simple fetch wrapper for our backend, with credentials for cookies.
+  const url = endpoint.startsWith('http') ? endpoint : `${BACKEND_URL}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+  const res = await fetch(url, { credentials: 'include', ...opts });
+  if (!res.ok) {
+    let err;
+    try { err = await res.json(); } catch { err = { error: res.statusText }; }
+    throw err;
+  }
+  return res.json();
+}
 
 // PUBLIC_INTERFACE
 function App() {
-  // Portfolio & Order state (mocked for now)
-  const [portfolio, setPortfolio] = useState([
-    { symbol: 'TCS', qty: 12, avgPrice: 3400, ltp: 3520 },
-    { symbol: 'INFY', qty: 20, avgPrice: 1430, ltp: 1425 },
-    { symbol: 'HDFCBANK', qty: 10, avgPrice: 1520, ltp: 1515 }
-  ]);
-
-  const [orders, setOrders] = useState([
-    { id: 1, symbol: 'TCS', side: 'BUY', qty: 4, status: 'Filled' },
-    { id: 2, symbol: 'INFY', side: 'SELL', qty: 5, status: 'Open' }
-  ]);
-
-  // Alerts
+  // AUTH STATE
+  const [user, setUser] = useState(null);
+  const [authStatus, setAuthStatus] = useState('checking');
+  // BACKEND portfolios/orders state
+  const [portfolio, setPortfolio] = useState([]);
+  const [orders, setOrders] = useState([]);
+  // Alerts and error/warning banners
   const [alerts, setAlerts] = useState([
     { id: 1, message: 'Nifty slipped below 20000!', type: 'danger' }
   ]);
-
-  // Market data & analytics (mocked)
+  // Mocked analytics/recommendations/market as previous
   const [market, setMarket] = useState({
-    nifty: 19950,
-    sensex: 66850,
-    volatility: 21.5,
-    trending: [
-      { symbol: 'RELIANCE', dir: 'UP', change: +1.8 },
-      { symbol: 'SBIN', dir: 'DOWN', change: -2.1 }
-    ]
+    nifty: 19950, sensex: 66850, volatility: 21.5,
+    trending: [ { symbol: 'RELIANCE', dir: 'UP', change: +1.8 }, { symbol: 'SBIN', dir: 'DOWN', change: -2.1 } ]
   });
-
-  // Recommendations & analysis (mock)
   const [recommendations, setRecommendations] = useState([
-    {
-      symbol: 'RELIANCE', 
-      action: 'BUY', 
-      reason: 'Strong momentum after results.',
-      confidence: 80
-    },
-    {
-      symbol: 'HDFCBANK', 
-      action: 'SELL', 
-      reason: 'Risk: High volatility and weak sector.',
-      confidence: 62
-    }
+    { symbol: 'RELIANCE', action: 'BUY', reason: 'Strong momentum after results.', confidence: 80 },
+    { symbol: 'HDFCBANK', action: 'SELL', reason: 'Risk: High volatility and weak sector.', confidence: 62 }
   ]);
-
-  // Options insights (mock)
   const [optionInsights, setOptionInsights] = useState([
-    {
-      symbol: 'NIFTY',
-      strike: 20000,
-      type: 'CE',
-      oiChange: '+4000',
-      suggestion: 'Watch for potential breakout'
-    }
+    { symbol: 'NIFTY', strike: 20000, type: 'CE', oiChange: '+4000', suggestion: 'Watch for potential breakout' }
   ]);
-
-  // Risk warnings (mock)
   const [risks, setRisks] = useState([
     { id: 1, message: 'Margin utilization >90% on SBIN!', severity: 'high' }
   ]);
+  // Bulk Order/Stop Loss form state
+  const [bulkSide, setBulkSide] = useState('SELL');
+  const [bulkPercent, setBulkPercent] = useState(50);
+  const [bulkSymbol, setBulkSymbol] = useState('');
+  const [bulkStatus, setBulkStatus] = useState('');
 
-  // Simulate real time data refresh intervals (for market/index only here)
+  // AUTH & DATA BOOTSTRAP
   useEffect(() => {
+    // Check if redirected from login-callback
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('auth') === 'success') {
+      setAlerts(a => [ ...a, { id: a.length+100, message: "Logged in successfully!", type: "success" } ]);
+      params.delete('auth');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+    // Check session user (profile)
+    async function checkAuth() {
+      setAuthStatus('checking');
+      try {
+        const userProfile = await apiFetch('/portfolio/user');
+        setUser(userProfile);
+        setAuthStatus('ok');
+        fetchPortfolio();
+        fetchOrders();
+      } catch (err) {
+        setAuthStatus('none');
+        setUser(null);
+      }
+    }
+    async function fetchPortfolio() {
+      try {
+        const holdings = await apiFetch('/portfolio/holdings');
+        // Zerodha: array of {tradingsymbol, quantity, average_price, last_price,...}
+        setPortfolio(Array.isArray(holdings)
+          ? holdings.map(h => ({
+              symbol: h.tradingsymbol,
+              qty: h.quantity,
+              avgPrice: h.average_price,
+              ltp: h.last_price
+            })) : []
+        );
+      } catch(err) { setPortfolio([]); }
+    }
+    async function fetchOrders() {
+      try {
+        const rawOrders = await apiFetch('/portfolio/orders');
+        setOrders(Array.isArray(rawOrders)
+          ? rawOrders.map(o => ({
+              id: o.order_id,
+              symbol: o.tradingsymbol,
+              side: o.transaction_type,
+              qty: o.quantity,
+              status: o.status
+            })) : []
+        );
+      } catch(err) { setOrders([]); }
+    }
+    checkAuth();
+    // Poll for backend portfolio every 40s if logged in
+    let pollIntv = null;
+    if (authStatus === 'ok') {
+      pollIntv = setInterval(() => { fetchPortfolio(); fetchOrders(); }, 40000);
+    }
+    // Still keep the market simulation for mock analytics
     const interval = setInterval(() => {
       setMarket(mkt => ({
         ...mkt,
@@ -82,59 +120,115 @@ function App() {
         }))
       }));
     }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      clearInterval(interval);
+      if(pollIntv) clearInterval(pollIntv);
+    };
+  }, [authStatus]);
 
-  // Bulk Order/Stop Loss form state
-  const [bulkSide, setBulkSide] = useState('SELL');
-  const [bulkPercent, setBulkPercent] = useState(50);
-  const [bulkSymbol, setBulkSymbol] = useState('');
-  const [bulkStatus, setBulkStatus] = useState('');
+  // Zerodha Authentication actions
+  // PUBLIC_INTERFACE
+  async function handleLogin() {
+    try {
+      const resp = await apiFetch('/auth/zerodha/login');
+      if (resp.url) {
+        window.location.href = resp.url;
+      } else {
+        setAlerts(a => [ ...a, { id: a.length+201, message: "Failed to get login URL.", type: 'danger' } ]);
+      }
+    } catch (err) {
+      setAlerts(a => [ ...a, { id: a.length+211, message: "Zerodha login error: "+(err.error||JSON.stringify(err)), type:'danger' } ]);
+    }
+  }
+
+  // PUBLIC_INTERFACE
+  async function handleLogout() {
+    try {
+      await apiFetch('/auth/zerodha/logout', { method: 'POST' });
+      setUser(null);
+      setAuthStatus('none');
+      setAlerts(a => [ ...a, { id: a.length+299, message: "Logged out successfully.", type:"success" } ]);
+      setPortfolio([]); setOrders([]);
+    } catch (err) {
+      setAlerts(a => [ ...a, { id: a.length+298, message: "Logout error: "+(err.error||JSON.stringify(err)), type: "danger" } ]);
+    }
+  }
 
   // PUBLIC_INTERFACE
   function calcPL(row) {
-    // Calculate P&L for single portfolio row
     const pnl = (row.ltp - row.avgPrice) * row.qty;
     const percent = ((row.ltp - row.avgPrice) / row.avgPrice) * 100;
-    return {
-      value: pnl,
-      percent
-    };
+    return { value: pnl, percent };
   }
 
   // PUBLIC_INTERFACE
-  function handleOrder(type, symbol, qty) {
-    // Place mock order and append
-    setOrders(lst => [
-      ...lst,
-      { id: lst.length + 1, symbol, side: type, qty, status: 'Open' }
-    ]);
-    setAlerts(a => [
-      ...a,
-      { id: a.length + 101, message: `Order Placed: ${type} ${qty} ${symbol}`, type: 'success' }
-    ]);
+  async function handleOrder(type, symbol, qty) {
+    try {
+      // Place real order
+      const result = await apiFetch('/trade/order', {
+        method: 'POST',
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({
+          tradingsymbol: symbol,
+          transaction_type: type,
+          quantity: Number(qty),
+          order_type: "MARKET",
+          product: "CNC",
+          variety: "regular"
+        })
+      });
+      setAlerts(a => [
+        ...a,
+        { id: a.length + 101, message: `Order Placed: ${type} ${qty} ${symbol} (Order ID: ${result.order_id||'?'})`, type: 'success' }
+      ]);
+      // Refresh orders
+      const rawOrders = await apiFetch('/portfolio/orders');
+      setOrders(Array.isArray(rawOrders)
+        ? rawOrders.map(o => ({
+            id: o.order_id,
+            symbol: o.tradingsymbol,
+            side: o.transaction_type,
+            qty: o.quantity,
+            status: o.status
+          })) : []
+      );
+    } catch (err) {
+      setAlerts(a => [
+        ...a,
+        { id: a.length + 136, message: `Order failed: ${(err.error||JSON.stringify(err))}`, type: 'danger' }
+      ]);
+    }
   }
 
   // PUBLIC_INTERFACE
-  function handleBulkOrder(e) {
+  async function handleBulkOrder(e) {
     e.preventDefault();
-    if (!bulkSymbol) return setBulkStatus('Please select stock for bulk action.');
-    setBulkStatus('Bulk order sent!');
-    // Mock: add order and trigger an alert
+    if (!bulkSymbol) return setBulkStatus('Please select stock.');
     let portfolioRow = portfolio.find(row => row.symbol === bulkSymbol);
     if (!portfolioRow) return setBulkStatus('No such stock in portfolio');
     let qty = Math.floor((portfolioRow.qty * bulkPercent) / 100);
-    handleOrder(bulkSide, bulkSymbol, qty);
+    try {
+      await handleOrder(bulkSide, bulkSymbol, qty);
+      setBulkStatus('Bulk order executed.');
+    } catch (e) {
+      setBulkStatus('Bulk order failed.');
+    }
   }
 
   // PUBLIC_INTERFACE
-  function triggerStopLoss(symbol) {
-    // Place stop loss order for stock
-    setAlerts(a => [
-      ...a,
-      { id: a.length + 202, message: `Stop Loss triggered for ${symbol}`, type: 'danger' }
-    ]);
-    handleOrder('SELL', symbol, 1);
+  async function triggerStopLoss(symbol) {
+    try {
+      await handleOrder('SELL', symbol, 1);
+      setAlerts(a => [
+        ...a,
+        { id: a.length + 202, message: `Stop Loss triggered for ${symbol}`, type: 'danger' }
+      ]);
+    } catch (e) {
+      setAlerts(a => [
+        ...a,
+        { id: a.length + 208, message: `Stop Loss order failed for ${symbol}`, type: 'danger' }
+      ]);
+    }
   }
 
   // Layout: dashboard with sidebar, main area, right info
@@ -146,8 +240,18 @@ function App() {
           <span style={{color:'#6610f2', fontSize:28, fontWeight:800, display:'inline-block',marginRight:10}}>◎</span>
           InvestOptix
         </div>
-        <div style={{ fontWeight: 400, color: '#6c757d', fontSize: '1.05rem', letterSpacing: 1 }}>
-          Markets, Alerts & Trading Controls
+        {/* Authentication status & actions */}
+        <div style={{ display: 'flex', alignItems:'center', fontWeight: 400, color: '#6c757d', fontSize: '1.01rem', letterSpacing: 1, gap: 18 }}>
+          {authStatus === 'checking' && <span>Checking login...</span>}
+          {authStatus === 'ok' && user &&
+            <>
+              <span style={{color: '#29d772', fontWeight:600}}>Logged in as {user.user_name || user.user_id || user.email || 'User'}</span>
+              <button className="btn" style={{background:'#ef233c', color:'#fff', fontWeight:500, padding:'6px 18px'}} onClick={handleLogout}>Logout</button>
+            </>
+          }
+          {authStatus === 'none' &&
+            <button className="btn" style={{background:'#0d6efd', color:'#fff', fontWeight:500, padding:'6px 21px'}} onClick={handleLogin}>Login with Zerodha</button>
+          }
         </div>
       </nav>
 
@@ -293,7 +397,6 @@ function SidebarNav() {
 
 // PUBLIC_INTERFACE
 function AlertList({ alerts }) {
-  // List of prominent alerts
   return (
     <div style={{marginBottom:17}}>
       {alerts.map(a =>
@@ -482,11 +585,17 @@ function PlaceOrderForm({ portfolio, onOrder }) {
   const [type, setType] = useState('BUY');
   const [qty, setQty] = useState(1);
   const [msg, setMsg] = useState('');
+  useEffect(() => {
+    // adjust symbol in case portfolio data loaded after
+    if (portfolio.length > 0 && !portfolio.find(s => s.symbol === symbol)) {
+      setSymbol(portfolio[0].symbol);
+    }
+  }, [portfolio]);
   return (
-    <form style={{marginBottom:14,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}} onSubmit={e => {
+    <form style={{marginBottom:14,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}} onSubmit={async e => {
       e.preventDefault();
       if(!symbol||qty<1) return setMsg('Invalid input');
-      onOrder(type, symbol, +qty);
+      await onOrder(type, symbol, +qty);
       setMsg('Order submitted!');
       setTimeout(()=>setMsg(''),900);
     }}>
@@ -569,7 +678,6 @@ function RecommendationsEngine({ recs }) {
 
 // PUBLIC_INTERFACE
 function MarketMonitor({ market }) {
-  // Prominent boxes for indices
   return (
     <div>
       <div style={{
